@@ -127,15 +127,15 @@ ArchUnit 规则**最危险的失败模式不是报错，而是匹配 0 个类而
 
 | # | 不变量 | 拒绝机制（违反时被什么拒绝） |
 |---|---|---|
-| 1 | **受控自主**：确定性流程掌握 Task / Evidence Gate / 权限 / 预算 / 发布权；Tutor Harness 只提出候选，不得直接发布教学事实。 | ArchUnit：`..harness..` 不得依赖 `..adapter.persistence..`（不能直写教学事实）；测试 `HARNESS_CANNOT_PUBLISH_DIRECTLY`；Evidence Gate 拒绝路径 `GATE_NOT_PASSED` |
+| 1 | **受控自主**：确定性流程掌握 Task / Evidence Gate / 权限 / 预算 / 发布权；Tutor Harness 只提出候选，不得直接发布教学事实。 | ArchUnit：`..teaching..harness..` 不得依赖 `..adapter.persistence..`（Harness Port 归 `teaching`，见 `架构总览:307`；**不写 `..harness..`——16 包中无该顶级包，会空匹配恒绿**）；测试 `HARNESS_CANNOT_PUBLISH_DIRECTLY`；Evidence Gate 拒绝路径 `GATE_NOT_PASSED` |
 | 2 | **六类事实账本分离**：Source/Evidence、Teaching/Media、Task/Playback、Outcome/Mastery、Memory、Eval/Release 互不混淆。 | DDL 层：六类账本不同 Schema/表前缀；跨账本外键禁止 ⇒ 迁移评审拒绝；测试 `LEDGER_CROSS_WRITE_REJECTED` |
-| 3 | **Agent 不生成任意 JavaScript**：教学画面由声明式 `TeachingAction` 渲染（版本化、可重放、可安全校验）。 | DTO 层：`TeachingAction.kind` 为闭集枚举，非法 kind ⇒ `400 ACTION_TYPE_NOT_ALLOWED`；测试 `ACTION_WHITELIST_ENFORCED` |
+| 3 | **Agent 不生成任意 JavaScript**：教学画面由声明式 `TeachingAction` 渲染（版本化、可重放、可安全校验）。 | DTO 层：`TeachingAction.kind` 为闭集枚举，非法 kind ⇒ `400 VALIDATION_FAILED` + `details.field=kind`；WS 面同一拒绝发 `ActionReject{reason="UNSUPPORTED_ACTION"}`（`契约-WebSocket课堂事件.md:203`）。**不得自造码名**；测试 `ACTION_WHITELIST_ENFORCED` |
 | 4 | **证据不足必须局部暂停，不得默认通过**：受影响依赖闭包暂停并说明缺口。 | Gate 状态机：`EVIDENCE_INSUFFICIENT` 只能转 `PAUSED`，不得转 `READY`；测试 `INSUFFICIENT_EVIDENCE_CANNOT_GO_READY` |
 | 5 | **额度耗尽只排队/暂停，绝不自动付费**（P-016）。 | `QuotaExhausted` ⇒ 状态 `QUEUED`；`ProviderBudgetLedger` 无充值接口；测试 `QUOTA_EXHAUSTED_NEVER_CHARGES` |
-| 6 | **首轮资料边界**：只接受公开或用户明确授权第三方处理的资料；公开 ≠ 可任意再分发/无限留存。 | `SourceLicense` 非 `PUBLIC`/`AUTHORIZED` ⇒ `403 DATA_SCOPE_FORBIDDEN`；测试 `UNAUTHORIZED_SOURCE_REJECTED` |
+| 6 | **首轮资料边界**：只接受公开或用户明确授权第三方处理的资料；公开 ≠ 可任意再分发/无限留存。 | `SourceLicense` 非 `PUBLIC`/`AUTHORIZED` ⇒ `403 AUTHZ_SCOPE_DENIED` + `details.reason=FORBIDDEN_DATA_SCOPE`（Fake Provider 必测语义见 `M0工程骨架与实验计划.md:75`）；测试 `UNAUTHORIZED_SOURCE_REJECTED` |
 | 7 | **播放完成 ≠ 掌握**：掌握需可观察证据，且只作建议、不强制解锁。 | 掌握度只能由 `OutcomeEvidence` 写入，`PlaybackCompleted` 事件无此权限；测试 `PLAYBACK_COMPLETION_IS_NOT_MASTERY` |
 | 8 | **Release 变更默认不能仅靠自动分晋级**：须 replay / shadow / canary + 显式准入（F06）。 | 发布 Gate 要求 `evidence_of_replay` 非空；缺失 ⇒ `RELEASE_BLOCKED_NO_EVIDENCE` |
-| 9 | **Memory 只存策略批准的偏好与经历**：不得吸收未核验知识，**不得把模型推断写入长期记忆**。 | `MemoryWritePolicy` 仅接受 `USER_CONFIRMED`/`POLICY_APPROVED`；模型推断 ⇒ `403 MEMORY_WRITE_FORBIDDEN`；测试 `MODEL_INFERENCE_NOT_PERSISTED` |
+| 9 | **Memory 只存策略批准的偏好与经历**：不得吸收未核验知识，**不得把模型推断写入长期记忆**。 | `MemoryWritePolicy` 仅接受 `USER_CONFIRMED`/`POLICY_APPROVED`；模型推断 ⇒ `MEMORY_WRITE_DENIED`（`契约-Context编译与记忆治理.md:209`，该码由 T11 并入 `Problem.code` 闭集）；测试 `MODEL_INFERENCE_NOT_PERSISTED` |
 | 10 | **未实测不得对外宣称 SLO**：数字无测量证据前只能标 `[待测]`。 | 文档门禁：无 `measurement_evidence` 的 SLO/性能数字 ⇒ G8 拒绝；测试 `NO_UNTESTED_SLO_CLAIM` |
 | 11 | **对象级授权**：读取路径必须有可测的跨作用域拒绝；不得只依赖应用层"记得加 where"。 | ArchUnit **SG-1..SG-6**（`契约-身份认证与对象级授权.md:330-335`）；测试 `CROSS_SCOPE_READ_REJECTED` |
 | 12 | **合规责任主体存在**：**治理与控制域承担**，发布 Gate 含 `content_marking` 轴。 | 发布 Gate 必须有 `content_marking` 轴；缺失 ⇒ `RELEASE_BLOCKED_NO_CONTENT_MARKING` |
@@ -151,7 +151,8 @@ ArchUnit 规则**最危险的失败模式不是报错，而是匹配 0 个类而
 - **日志脱敏**：不得打印完整凭证、Cookie、用户原文资料内容、Provider 请求体。
 - **对象级授权必须可测**：每条读取路径要有跨作用域拒绝用例；只写 `@PreAuthorize` 不算完成。
 - **SQL 只允许参数化**：MyBatis `#{}`，禁止 `${}` 拼接用户输入。
-- **CSP / CSRF / Cookie 属性**按 `dev/20-契约/契约-安全基线.md` §2 取值，不得自定。
+- **Cookie 属性与 CSRF**按 `dev/20-契约/契约-安全基线.md` §2.2/§2.3 取值，不得自定。
+- **CSP 响应头**按 `契约-安全基线.md` §2.4 取值（该节含 `default-src` / `script-src` / `frame-ancestors` 逐项取值与拒绝行为），不得自定；下发点用 Spring Security `headers().contentSecurityPolicy(...)`，**不**自研过滤器。
 - 依赖漏洞与 SBOM 门禁见 `契约-安全基线.md` §5。
 
 ---
