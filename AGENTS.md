@@ -127,7 +127,7 @@ ArchUnit 规则**最危险的失败模式不是报错，而是匹配 0 个类而
 
 | # | 不变量 | 拒绝机制（违反时被什么拒绝） |
 |---|---|---|
-| 1 | **受控自主**：确定性流程掌握 Task / Evidence Gate / 权限 / 预算 / 发布权；Tutor Harness 只提出候选，不得直接发布教学事实。 | ArchUnit：`..teaching..harness..` 不得依赖 `..adapter.persistence..`（Harness Port 归 `teaching`，见 `架构总览:307`；**不写 `..harness..`——16 包中无该顶级包，会空匹配恒绿**）；测试 `HARNESS_CANNOT_PUBLISH_DIRECTLY`；Evidence Gate 拒绝路径 `GATE_NOT_PASSED` |
+| 1 | **受控自主**：确定性流程掌握 Task / Evidence Gate / 权限 / 预算 / 发布权；Tutor Harness 只提出候选，不得直接发布教学事实。 | 测试 `HARNESS_CANNOT_PUBLISH_DIRECTLY`（Harness 只产候选，发布权在确定性流程）；Evidence Gate 拒绝路径 `GATE_NOT_PASSED`。<br>**不使用 ArchUnit 约束本条**：`teaching` 承担 Harness Port 的**责任**，但 `harness` 不是真实子包（§2 的 16 包与 §1 的五层均无此名），写 `..harness..` 或 `..teaching..harness..` 都会匹配 0 类而恒绿——本仓已在 §2.1.1 把「空匹配恒绿」列为禁止的反面模式。 |
 | 2 | **六类事实账本分离**：Source/Evidence、Teaching/Media、Task/Playback、Outcome/Mastery、Memory、Eval/Release 互不混淆。 | DDL 层：六类账本不同 Schema/表前缀；跨账本外键禁止 ⇒ 迁移评审拒绝；测试 `LEDGER_CROSS_WRITE_REJECTED` |
 | 3 | **Agent 不生成任意 JavaScript**：教学画面由声明式 `TeachingAction` 渲染（版本化、可重放、可安全校验）。 | DTO 层：`TeachingAction.kind` 为闭集枚举，非法 kind ⇒ `400 VALIDATION_FAILED` + `details.field=kind`；WS 面同一拒绝发 `ActionReject{reason="UNSUPPORTED_ACTION"}`（`契约-WebSocket课堂事件.md:203`）。**不得自造码名**；测试 `ACTION_WHITELIST_ENFORCED` |
 | 4 | **证据不足必须局部暂停，不得默认通过**：受影响依赖闭包暂停并说明缺口。 | Gate 状态机：`EVIDENCE_INSUFFICIENT` 只能转 `PAUSED`，不得转 `READY`；测试 `INSUFFICIENT_EVIDENCE_CANNOT_GO_READY` |
