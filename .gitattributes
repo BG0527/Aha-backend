@@ -1,0 +1,28 @@
+# 统一换行：Windows 开发机 + Linux 部署机共存，禁止 CRLF 噪音进入 diff。
+* text=auto eol=lf
+
+# Windows 专用脚本必须保留 CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Unix 可执行脚本（Maven Wrapper 等）必须保留 LF
+*.sh text eol=lf
+mvnw text eol=lf
+
+# 二进制：禁止换行转换与文本 diff
+*.jar binary
+*.war binary
+*.zip binary
+*.gz binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# SQL 迁移：Flyway checksum 对字节敏感，固定 LF
+*.sql text eol=lf

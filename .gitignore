@@ -1,0 +1,84 @@
+# Aha backend — 忽略规则
+# 原则：构建产物 / 本地运行时数据 / 密钥 / 日志 / IDE 不入库；
+#      Maven Wrapper(.mvn/wrapper/**、mvnw、mvnw.cmd) 属于仓库基础设施，必须入库。
+
+# ---------- 构建产物：Maven ----------
+#
+# target/ 以「任意深度」匹配，覆盖单模块与将来可能的多模块布局。
+# Maven Wrapper（.mvn/wrapper/**、mvnw、mvnw.cmd）属于仓库基础设施，必须入库，
+# 故只忽略 .mvn/ 下的本地状态文件，不忽略整个 .mvn/。
+target/
+*.class
+dependency-reduced-pom.xml
+pom.xml.releaseBackup
+pom.xml.tag
+pom.xml.next
+release.properties
+.mvn/timing.properties
+
+# ---------- 构建产物：Gradle（当前未采用，保留以防误引入后产物入库）----------
+.gradle/
+build/
+
+# ---------- 构建产物：IDE 增量输出 ----------
+out/
+bin/
+*.hprof
+
+# ---------- 本地运行时数据（绝不入库）----------
+logs/
+*.log
+hs_err_pid*
+replay_pid*
+.attach_pid*
+
+data/
+uploads/
+blobs/
+*.db
+*.db-journal
+*.mv.db
+*.trace.db
+
+# ---------- 密钥与凭证（硬红线：永不入库）----------
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+
+# ---------- IDE / 工具 ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.settings/
+.classpath
+.project
+.factorypath
+.apt_generated/
+.vscode/
+!.vscode/extensions.json
+
+# ---------- 操作系统 ----------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ---------- 临时/草稿 ----------
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+*~
+.agents/local/
+.claude/local/
