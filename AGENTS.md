@@ -14,7 +14,7 @@
 | 部署单元 | 单个 Spring Boot 可部署单元（模块化单体，不是微服务） |
 | 语言基线 | **Java 21（LTS）** —— 不得自行降级，也不得自行升级 |
 | 构建工具 | **Maven**（`apache-maven-3.9.12`，JDK 21） |
-| 包根 | `com.nixiang.tutor` |
+| 包根 | `com.Aha.tutor` |
 | 上层仓库 | **无**。顶层 `study/` 不是 git 仓；`competitor/` 下的嵌套仓与本仓无关，**不得修改** |
 
 ---
@@ -40,11 +40,11 @@
 ## 2. 模块边界（16 个包，代码结构的唯一坐标）
 
 ```
-com.nixiang.tutor
+com.Aha.tutor
 ├─ bootstrap    identity   source     evidence   learning
 ├─ teaching     task       playback   outcome    gateway
 ├─ worker       evaluation governance memory     tool
-└─ context     （可与 memory 合并，拆分需 ADR）
+└─ context     （已定拆分，不并入 memory；`context_manifest` 一表一写者，见 架构总览 §5.5.1.1）
 ```
 
 规则（完整矩阵见 `dev/10-架构/架构总览-可视化AI私人教师.md` §5.5.2）：
@@ -67,8 +67,13 @@ Controller/WebSocket Adapter
 ### 2.1 ArchUnit 必须捕获的禁止项（缺一即 G7 不通过）
 
 ```java
-// 包级无环
-slices().matching("com.nixiang.tutor.(*)..").should().beFreeOfCycles();
+// 包级环检测（R1 分级，见 架构总览 §5.5.3）
+// ⚠ 不得直接写裸 beFreeOfCycles()：矩阵本身已有 3 个真实 SCC，
+//   裸规则会恒红。必须按「违规集合 ⊆ 已登记 SCC 允许边」包装。
+// 已登记 SCC：{evidence,source,task,worker} / {learning,memory,teaching} / {outcome⇄playback}
+// 禁止：新 SCC、跨 SCC 环。判定用 Tarjan SCC，不用 DFS 回边（回边随起点变化会误报）。
+slices().matching("com.Aha.tutor.(*)..").should().beFreeOfCycles()
+    .because("R1 分级：仅允许 §5.5.3 登记的 3 个 SCC；驱动此断言的实现必须先剔除已登记 SCC 内部边");
 
 // 1. gateway 不得依赖 teaching（Provider 不能写教学事实）
 noClasses().that().resideInAPackage("..gateway..")
