@@ -14,7 +14,7 @@
 | 部署单元 | 单个 Spring Boot 可部署单元（模块化单体，不是微服务） |
 | 语言基线 | **Java 21（LTS）** —— 不得自行降级，也不得自行升级 |
 | 构建工具 | **Maven**（`apache-maven-3.9.12`，JDK 21） |
-| 包根 | `com.nixiang.tutor` |
+| 包根 | `com.Aha.tutor` |
 | 上层仓库 | **无**。顶层 `study/` 不是 git 仓；`competitor/` 下的嵌套仓与本仓无关，**不得修改** |
 
 ---
@@ -40,11 +40,11 @@
 ## 2. 模块边界（16 个包，代码结构的唯一坐标）
 
 ```
-com.nixiang.tutor
+com.Aha.tutor
 ├─ bootstrap    identity   source     evidence   learning
 ├─ teaching     task       playback   outcome    gateway
 ├─ worker       evaluation governance memory     tool
-└─ context     （可与 memory 合并，拆分需 ADR）
+└─ context     （已定拆分，不并入 memory；`context_manifest` 一表一写者，见 架构总览 §5.5.1.1）
 ```
 
 规则（完整矩阵见 `dev/10-架构/架构总览-可视化AI私人教师.md` §5.5.2）：
@@ -67,20 +67,29 @@ Controller/WebSocket Adapter
 ### 2.1 ArchUnit 必须捕获的禁止项（缺一即 G7 不通过）
 
 ```java
-// 包级无环
-slices().matching("com.nixiang.tutor.(*)..").should().beFreeOfCycles();
+// 包级环检测（R1 分级，见 架构总览 §5.5.3）
+// ⚠ 不得直接写裸 beFreeOfCycles()：矩阵本身已有 3 个真实 SCC，
+//   裸规则会恒红。必须按「违规集合 ⊆ 已登记 SCC 允许边」包装。
+// 已登记 SCC：{evidence,source,task,worker} / {learning,memory,teaching} / {outcome⇄playback}
+// 禁止：新 SCC、跨 SCC 环。判定用 Tarjan SCC，不用 DFS 回边（回边随起点变化会误报）。
+slices().matching("com.Aha.tutor.(*)..").should().beFreeOfCycles()
+    .because("R1 分级：仅允许 §5.5.3 登记的 3 个 SCC；驱动此断言的实现必须先剔除已登记 SCC 内部边");
 
 // 1. gateway 不得依赖 teaching（Provider 不能写教学事实）
 noClasses().that().resideInAPackage("..gateway..")
     .should().dependOnClassesThat().resideInAPackage("..teaching..");
 
-// 2. playback 不得访问 task 的 Repository
+// 2. playback 不得访问 task 的持久化实现
+// 包名按契约 `契约-身份认证与对象级授权.md` SG-3 的命名：..adapter.persistence..
+// （旧稿写的 ..task.repository.. 在契约命名下匹配 0 个类 → 空匹配恒绿 → G7 绿而架构已破）
 noClasses().that().resideInAPackage("..playback..")
-    .should().accessClassesThat().resideInAPackage("..task.repository..");
+    .should().accessClassesThat().resideInAPackage("..adapter.persistence..");
 
 // 3. teaching 不得直接依赖 Controller
+// 用 ..adapter.web.. 而非 ..api..：`..` 可匹配零级包，写成 ..api.. 会把 teaching.api 一起命中，
+// 与上文「每个模块都有 api 层」自相矛盾（Controller 引同包 DTO 即误报）。
 noClasses().that().resideInAPackage("..teaching..")
-    .should().dependOnClassesThat().resideInAPackage("..api..");
+    .should().dependOnClassesThat().resideInAPackage("..adapter.web..");
 
 // 4. memory 不得依赖 teaching
 noClasses().that().resideInAPackage("..memory..")
@@ -96,24 +105,48 @@ noClasses().that().resideInAPackage("..domain..")
     .resideInAnyPackage("org.springframework..", "jakarta.persistence..", "io.agentscope..");
 ```
 
+#### 2.1.1 反例自证（防空匹配恒 GREEN）
+
+ArchUnit 规则**最危险的失败模式不是报错，而是匹配 0 个类而静默通过**（本仓已发生过一次：`..task.repository..` 在契约命名下匹配 0 类）。因此六条规则每条都必须配一个**反例测试**，证明「规则确实能捕获违规」：
+
+| 规则 | 反例自证方式 | 断言名 |
+|---|---|---|
+| 包级无环 | 构造 `a→b→a` 的测试包，断言 ArchUnit 报 cycle | `R0_CYCLE_DETECTED` |
+| 1 gateway↛teaching | 测试包里放一个 gateway 类引用 teaching 类，断言违规 | `R1_GATEWAY_TO_TEACHING_DETECTED` |
+| 2 playback↛persistence | 同上，playback 类引用 `..adapter.persistence..` 类 | `R2_PLAYBACK_TO_PERSISTENCE_DETECTED` |
+| 3 teaching↛web | teaching 类引用 `..adapter.web..` 类 | `R3_TEACHING_TO_WEB_DETECTED` |
+| 4 memory↛teaching | memory 类引用 teaching 类 | `R4_MEMORY_TO_TEACHING_DETECTED` |
+| 5 tool↛governance | tool 类引用 governance 类 | `R5_TOOL_TO_GOVERNANCE_DETECTED` |
+| 6 domain↛框架 | domain 类引用 `org.springframework..` 类 | `R6_DOMAIN_TO_FRAMEWORK_DETECTED` |
+
+**判据**：任一规则若「删掉规则后反例仍通过」，说明规则无效 ⇒ G7 不通过。
+反例类放在 `src/test/java/**/archunit/fixtures/`，**不得**进入生产包。
+
 ---
 
 ## 3. 不可违背的 12 条不变量
 
 来源：`dev/HANDOFF-20261017.md` §5（逐字保留，本仓内**不得弱化**）。
 
-1. **受控自主**：确定性流程掌握 Task / Evidence Gate / 权限 / 预算 / 发布权；Tutor Harness 只提出候选，不得直接发布教学事实。
-2. **六类事实账本分离**：Source/Evidence、Teaching/Media、Task/Playback、Outcome/Mastery、Memory、Eval/Release 互不混淆。
-3. **Agent 不生成任意 JavaScript**：教学画面由声明式 `TeachingAction` 渲染（版本化、可重放、可安全校验）。
-4. **证据不足必须局部暂停，不得默认通过**：受影响依赖闭包暂停并说明缺口。
-5. **额度耗尽只排队/暂停，绝不自动付费**（P-016）。
-6. **首轮资料边界**：只接受公开或用户明确授权第三方处理的资料；公开 ≠ 可任意再分发/无限留存。
-7. **播放完成 ≠ 掌握**：掌握需可观察证据，且只作建议、不强制解锁。
-8. **Release 变更不能仅靠自动分晋级**：须 replay / shadow / canary + 显式准入（ADR-F06）。
-9. **Memory 只存策略批准的偏好与经历**：不得吸收未核验知识。
-10. **未实测不得对外宣称 SLO**：无测量证据一律标 `[待测]`。
-11. **对象级授权**：读取路径必须有可测的跨作用域拒绝，不得只靠"记得加 where"。
-12. **合规责任主体存在**：发布 Gate 含 `content_marking` 轴。
+**每条都必须绑定至少一个可执行的拒绝机制**（测试 ID / ArchUnit 规则 / 门禁项）。没有拒绝机制的不变量只是原则，不构成约束；下表任一行的「拒绝机制」为空即 G1 不通过。
+
+| # | 不变量 | 拒绝机制（违反时被什么拒绝） |
+|---|---|---|
+| 1 | **受控自主**：确定性流程掌握 Task / Evidence Gate / 权限 / 预算 / 发布权；Tutor Harness 只提出候选，不得直接发布教学事实。 | 测试 `HARNESS_CANNOT_PUBLISH_DIRECTLY`（Harness 只产候选，发布权在确定性流程）；Evidence Gate 拒绝路径 `GATE_NOT_PASSED`。<br>**不使用 ArchUnit 约束本条**：`teaching` 承担 Harness Port 的**责任**，但 `harness` 不是真实子包（§2 的 16 包与 §1 的五层均无此名），写 `..harness..` 或 `..teaching..harness..` 都会匹配 0 类而恒绿——本仓已在 §2.1.1 把「空匹配恒绿」列为禁止的反面模式。 |
+| 2 | **六类事实账本分离**：Source/Evidence、Teaching/Media、Task/Playback、Outcome/Mastery、Memory、Eval/Release 互不混淆。 | DDL 层：六类账本不同 Schema/表前缀；跨账本外键禁止 ⇒ 迁移评审拒绝；测试 `LEDGER_CROSS_WRITE_REJECTED` |
+| 3 | **Agent 不生成任意 JavaScript**：教学画面由声明式 `TeachingAction` 渲染（版本化、可重放、可安全校验）。 | DTO 层：`TeachingAction.kind` 为闭集枚举，非法 kind ⇒ `400 VALIDATION_FAILED` + `details.field=kind`；WS 面同一拒绝发 `ActionReject{reason="UNSUPPORTED_ACTION"}`（`契约-WebSocket课堂事件.md:203`）。**不得自造码名**；测试 `ACTION_WHITELIST_ENFORCED` |
+| 4 | **证据不足必须局部暂停，不得默认通过**：受影响依赖闭包暂停并说明缺口。 | Gate 状态机：`EVIDENCE_INSUFFICIENT` 只能转 `PAUSED`，不得转 `READY`；测试 `INSUFFICIENT_EVIDENCE_CANNOT_GO_READY` |
+| 5 | **额度耗尽只排队/暂停，绝不自动付费**（P-016）。 | `QuotaExhausted` ⇒ 状态 `QUEUED`；`ProviderBudgetLedger` 无充值接口；测试 `QUOTA_EXHAUSTED_NEVER_CHARGES` |
+| 6 | **首轮资料边界**：只接受公开或用户明确授权第三方处理的资料；公开 ≠ 可任意再分发/无限留存。 | `SourceLicense` 非 `PUBLIC`/`AUTHORIZED` ⇒ `403 AUTHZ_SCOPE_DENIED` + `details.reason=FORBIDDEN_DATA_SCOPE`（Fake Provider 必测语义见 `M0工程骨架与实验计划.md:75`）；测试 `UNAUTHORIZED_SOURCE_REJECTED` |
+| 7 | **播放完成 ≠ 掌握**：掌握需可观察证据，且只作建议、不强制解锁。 | 掌握度只能由 `OutcomeEvidence` 写入，`PlaybackCompleted` 事件无此权限；测试 `PLAYBACK_COMPLETION_IS_NOT_MASTERY` |
+| 8 | **Release 变更默认不能仅靠自动分晋级**：须 replay / shadow / canary + 显式准入（F06）。 | 发布 Gate 要求 `evidence_of_replay` 非空；缺失 ⇒ `RELEASE_BLOCKED_NO_EVIDENCE` |
+| 9 | **Memory 只存策略批准的偏好与经历**：不得吸收未核验知识，**不得把模型推断写入长期记忆**。 | `MemoryWritePolicy` 仅接受 `USER_CONFIRMED`/`POLICY_APPROVED`；模型推断 ⇒ `MEMORY_WRITE_DENIED`（`契约-Context编译与记忆治理.md:209`，该码由 T11 并入 `Problem.code` 闭集）；测试 `MODEL_INFERENCE_NOT_PERSISTED` |
+| 10 | **未实测不得对外宣称 SLO**：数字无测量证据前只能标 `[待测]`。 | 文档门禁：无 `measurement_evidence` 的 SLO/性能数字 ⇒ G8 拒绝；测试 `NO_UNTESTED_SLO_CLAIM` |
+| 11 | **对象级授权**：读取路径必须有可测的跨作用域拒绝；不得只依赖应用层"记得加 where"。 | ArchUnit **SG-1..SG-6**（`契约-身份认证与对象级授权.md:330-335`）；测试 `CROSS_SCOPE_READ_REJECTED` |
+| 12 | **合规责任主体存在**：**治理与控制域承担**，发布 Gate 含 `content_marking` 轴。 | 发布 Gate 必须有 `content_marking` 轴；缺失 ⇒ `RELEASE_BLOCKED_NO_CONTENT_MARKING` |
+
+> 表中测试 ID 是本仓**约定的断言名**，由 G3（`test-lead`）落成真实测试、G5 核验执行。
+> 在对应测试落地前，该行按「尚未可执行」处理，**不得**标为已满足。
 
 ---
 
@@ -123,7 +156,8 @@ noClasses().that().resideInAPackage("..domain..")
 - **日志脱敏**：不得打印完整凭证、Cookie、用户原文资料内容、Provider 请求体。
 - **对象级授权必须可测**：每条读取路径要有跨作用域拒绝用例；只写 `@PreAuthorize` 不算完成。
 - **SQL 只允许参数化**：MyBatis `#{}`，禁止 `${}` 拼接用户输入。
-- **CSP / CSRF / Cookie 属性**按 `dev/20-契约/契约-安全基线.md` §2 取值，不得自定。
+- **Cookie 属性与 CSRF**按 `dev/20-契约/契约-安全基线.md` §2.2/§2.3 取值，不得自定。
+- **CSP 响应头**按 `契约-安全基线.md` §2.4 取值（该节含 `default-src` / `script-src` / `frame-ancestors` 逐项取值与拒绝行为），不得自定；下发点用 Spring Security `headers().contentSecurityPolicy(...)`，**不**自研过滤器。
 - 依赖漏洞与 SBOM 门禁见 `契约-安全基线.md` §5。
 
 ---
